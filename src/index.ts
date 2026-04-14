@@ -1,6 +1,6 @@
 import "dotenv/config";
 import express from "express";
-import { WhatsAppClient, warmClient, getCurrentQR, isClientReady } from "./clients/whatsapp.js";
+import { WhatsAppClient, warmClient, getCurrentQR, isClientReady, takeScreenshot } from "./clients/whatsapp.js";
 import QRCode from "qrcode";
 
 // --setup mode: local QR scan, then exit
@@ -21,36 +21,35 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok", whatsapp_ready: isClientReady() });
 });
 
-// Visit this on Railway to scan QR once
+// Live browser view — shows exactly what headless Chromium sees
+app.get("/screenshot", async (_req, res) => {
+  const buf = await takeScreenshot();
+  if (!buf) {
+    return res.status(503).send("Browser not started yet");
+  }
+  res.setHeader("Content-Type", "image/png");
+  res.send(buf);
+});
+
+// Setup page — auto-refreshing live view of the browser
 app.get("/setup", async (_req, res) => {
-  if (isClientReady()) {
-    return res.send(`
-      <html><body style="font-family:sans-serif;text-align:center;padding:60px">
-        <h1>✅ WhatsApp Connected</h1>
-        <p>Your session is active.</p>
-      </body></html>
-    `);
-  }
-  const qr = getCurrentQR();
-  if (!qr) {
-    return res.send(`
-      <html>
-        <head><meta http-equiv="refresh" content="3"></head>
-        <body style="font-family:sans-serif;text-align:center;padding:60px">
-          <h1>⏳ Starting up...</h1><p>Refresh in a few seconds.</p>
-        </body>
-      </html>
-    `);
-  }
-  const qrImage = await QRCode.toDataURL(qr);
+  const status = isClientReady() ? "✅ Connected & synced" : getCurrentQR() ? "📱 QR code visible — scan now" : "⏳ Starting up...";
   res.send(`
     <html>
-      <head><title>WhatsApp Setup</title><meta http-equiv="refresh" content="20"></head>
-      <body style="font-family:sans-serif;text-align:center;padding:60px">
-        <h1>📱 Scan QR Code</h1>
-        <p>WhatsApp → Menu (⋮) → Linked Devices → Link a Device</p>
-        <img src="${qrImage}" style="width:280px;height:280px;border:2px solid #ccc;border-radius:8px"/>
-        <p style="color:#888;font-size:14px">Auto-refreshes every 20s</p>
+      <head>
+        <title>WhatsApp Setup</title>
+        <meta http-equiv="refresh" content="4">
+        <style>
+          body { font-family: sans-serif; text-align: center; padding: 40px; background: #111; color: #eee; }
+          img { border: 2px solid #444; border-radius: 8px; max-width: 100%; margin-top: 20px; }
+          .status { font-size: 20px; margin-bottom: 16px; }
+        </style>
+      </head>
+      <body>
+        <h2>WhatsApp Browser — Live View</h2>
+        <div class="status">${status}</div>
+        <p style="color:#888;font-size:13px">Auto-refreshes every 4s — you're seeing the actual headless Chromium screen</p>
+        <img src="/screenshot?t=${Date.now()}" alt="browser screenshot" />
       </body>
     </html>
   `);

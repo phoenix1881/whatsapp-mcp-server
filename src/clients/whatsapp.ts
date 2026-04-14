@@ -35,6 +35,15 @@ export function isClientReady(): boolean {
   return _isReady;
 }
 
+export async function takeScreenshot(): Promise<Buffer | null> {
+  if (!_client?.pupPage) return null;
+  try {
+    return await _client.pupPage.screenshot({ type: "png" });
+  } catch {
+    return null;
+  }
+}
+
 function createClient(forceVisible = false) {
   const headless = forceVisible ? false : USE_HEADLESS;
   const args = [
