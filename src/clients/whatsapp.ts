@@ -36,12 +36,36 @@ export function isClientReady(): boolean {
 }
 
 export async function takeScreenshot(): Promise<Buffer | null> {
-  if (!_client?.pupPage) return null;
+  if (!_client) return null;
   try {
-    return await _client.pupPage.screenshot({ type: "png" });
+    // pupPage is the primary reference
+    if (_client.pupPage) {
+      return await _client.pupPage.screenshot({ type: "png" });
+    }
+    // Fallback: grab the first page from the browser directly
+    const pages = await _client.pupBrowser?.pages();
+    if (pages?.length) {
+      return await pages[0].screenshot({ type: "png" });
+    }
   } catch {
-    return null;
+    // ignore
   }
+  return null;
+}
+
+// Set by warmClient after ready, resolved when user hits /ack
+let _ackResolve: (() => void) | null = null;
+let _pendingAck = false;
+
+export function isPendingAck(): boolean {
+  return _pendingAck;
+}
+
+export function acknowledgeSync(): void {
+  _pendingAck = false;
+  _isReady = true;
+  _ackResolve?.();
+  _ackResolve = null;
 }
 
 function createClient(forceVisible = false) {
@@ -138,29 +162,15 @@ export function warmClient(): void {
     _client.on("ready", async () => {
       clearTimeout(timeout);
       _currentQR = null;
-      console.error("WhatsApp ready event fired — waiting for chats to sync...");
+      _pendingAck = true;
+      console.error("WhatsApp authenticated — visit /setup and click 'Mark as Synced' once your chats are loaded.");
 
-      // Poll getChats() until chats are actually loaded (max 90s)
-      const syncStart = Date.now();
-      while (Date.now() - syncStart < 90_000) {
-        try {
-          const chats = await _client.getChats();
-          if (chats.length > 0) {
-            console.error(`Chats synced — ${chats.length} chats loaded.`);
-            _isReady = true;
-            resolve();
-            return;
-          }
-        } catch {
-          // getChats not ready yet, keep waiting
-        }
-        console.error("Chats not loaded yet, retrying in 5s...");
-        await new Promise((r) => setTimeout(r, 5000));
-      }
+      // Hold here until user hits /ack
+      await new Promise<void>((res) => {
+        _ackResolve = res;
+      });
 
-      // Chats never loaded but we're technically authenticated
-      console.error("Warning: chats did not sync within 90s, marking ready anyway.");
-      _isReady = true;
+      console.error("Sync acknowledged — WhatsApp is ready.");
       resolve();
     });
 

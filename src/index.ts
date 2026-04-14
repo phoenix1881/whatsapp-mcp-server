@@ -1,6 +1,6 @@
 import "dotenv/config";
 import express from "express";
-import { WhatsAppClient, warmClient, getCurrentQR, isClientReady, takeScreenshot } from "./clients/whatsapp.js";
+import { WhatsAppClient, warmClient, getCurrentQR, isClientReady, takeScreenshot, isPendingAck, acknowledgeSync } from "./clients/whatsapp.js";
 import QRCode from "qrcode";
 
 // --setup mode: local QR scan, then exit
@@ -31,28 +31,52 @@ app.get("/screenshot", async (_req, res) => {
   res.send(buf);
 });
 
-// Setup page — auto-refreshing live view of the browser
+// Setup page — live view + manual ack button
 app.get("/setup", async (_req, res) => {
-  const status = isClientReady() ? "✅ Connected & synced" : getCurrentQR() ? "📱 QR code visible — scan now" : "⏳ Starting up...";
+  let status: string;
+  let actionHtml = "";
+
+  if (isClientReady()) {
+    status = "✅ Connected & synced — ready to use";
+  } else if (isPendingAck()) {
+    status = "👀 Logged in! Watch the screen below — when your chats are fully loaded, click the button";
+    actionHtml = `
+      <form action="/ack" method="post" style="margin: 20px 0">
+        <button type="submit" style="font-size:18px;padding:14px 32px;background:#25d366;color:#fff;border:none;border-radius:8px;cursor:pointer">
+          ✅ Chats are loaded — Mark as Synced
+        </button>
+      </form>`;
+  } else if (getCurrentQR()) {
+    status = "📱 QR code visible in browser below — scan it now";
+  } else {
+    status = "⏳ Starting up...";
+  }
+
   res.send(`
     <html>
       <head>
         <title>WhatsApp Setup</title>
-        <meta http-equiv="refresh" content="4">
+        ${!isClientReady() ? '<meta http-equiv="refresh" content="4">' : ""}
         <style>
           body { font-family: sans-serif; text-align: center; padding: 40px; background: #111; color: #eee; }
-          img { border: 2px solid #444; border-radius: 8px; max-width: 100%; margin-top: 20px; }
-          .status { font-size: 20px; margin-bottom: 16px; }
+          img { border: 2px solid #444; border-radius: 8px; max-width: 90%; margin-top: 20px; }
         </style>
       </head>
       <body>
         <h2>WhatsApp Browser — Live View</h2>
-        <div class="status">${status}</div>
-        <p style="color:#888;font-size:13px">Auto-refreshes every 4s — you're seeing the actual headless Chromium screen</p>
+        <p style="font-size:18px">${status}</p>
+        ${actionHtml}
+        <p style="color:#888;font-size:13px">Live screenshot of headless Chromium — auto-refreshes every 4s</p>
         <img src="/screenshot?t=${Date.now()}" alt="browser screenshot" />
       </body>
     </html>
   `);
+});
+
+// User clicks "Mark as Synced" — releases the warmClient hold
+app.post("/ack", (_req, res) => {
+  acknowledgeSync();
+  res.redirect("/setup");
 });
 
 // Returns same JSON as the terminal test
