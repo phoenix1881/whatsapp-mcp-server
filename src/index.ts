@@ -1,6 +1,6 @@
 import "dotenv/config";
 import express from "express";
-import { WhatsAppClient, warmClient, getCurrentQR, isClientReady, takeScreenshot, isPendingAck, acknowledgeSync } from "./clients/whatsapp.js";
+import { WhatsAppClient, warmClient, getCurrentQR, isClientReady, takeScreenshot, isPendingAck, acknowledgeSync, getDebugState } from "./clients/whatsapp.js";
 import QRCode from "qrcode";
 
 // --setup mode: local QR scan, then exit
@@ -19,6 +19,12 @@ const client = new WhatsAppClient();
 
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", whatsapp_ready: isClientReady() });
+});
+
+// Full debug dump — browser state, page count, screenshot health, chat count
+app.get("/debug", async (_req, res) => {
+  const state = await getDebugState();
+  res.json(state);
 });
 
 // Live browser view — shows exactly what headless Chromium sees
