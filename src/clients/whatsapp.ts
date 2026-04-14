@@ -137,7 +137,12 @@ function createClient(forceVisible = false) {
   log(`createClient: headless=${headless}, chromium=${CHROMIUM_PATH}`);
   return new Client({
     authStrategy: new LocalAuth({ dataPath: SESSION_DIR }),
-    puppeteer: { headless, executablePath: CHROMIUM_PATH, args },
+    puppeteer: {
+      headless,
+      executablePath: CHROMIUM_PATH,
+      args,
+      protocolTimeout: 120_000, // default 30s is too short for WhatsApp chat sync
+    },
   });
 }
 
@@ -253,6 +258,29 @@ export function warmClient(): void {
   });
 }
 
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+async function getChatsWithRetry(client: any, maxAttempts = 4): Promise<any[]> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      log(`getChats() attempt ${attempt}/${maxAttempts}...`);
+      const chats = await client.getChats();
+      log(`getChats() succeeded — ${chats.length} chats`);
+      return chats;
+    } catch (e: any) {
+      log(`getChats() attempt ${attempt} failed: ${e.message}`);
+      if (attempt < maxAttempts) {
+        const wait = attempt * 5000; // 5s, 10s, 15s
+        log(`retrying in ${wait / 1000}s...`);
+        await new Promise((r) => setTimeout(r, wait));
+      } else {
+        throw new Error(`getChats() failed after ${maxAttempts} attempts: ${e.message}`);
+      }
+    }
+  }
+  return [];
+}
+
 // ── Public API ─────────────────────────────────────────────────────────────────
 
 export class WhatsAppClient {
@@ -260,13 +288,7 @@ export class WhatsAppClient {
     log("getUnreadMessages() called");
     const client = await getClient();
     log("got client, calling getChats()...");
-    let chats: any[];
-    try {
-      chats = await client.getChats();
-    } catch (e: any) {
-      throw new Error(`getChats() failed: ${e?.message || e}`);
-    }
-    log(`getChats() returned ${chats.length} chats`);
+    const chats = await getChatsWithRetry(client);
     const withUnread = chats.filter((c: any) => c.unreadCount > 0 && !c.archived);
     const unread = withUnread
       .map((c: any) => ({ name: c.name, unread_count: c.unreadCount, is_group: c.isGroup }))
@@ -282,12 +304,7 @@ export class WhatsAppClient {
   async getContactsWithUnread() {
     log("getContactsWithUnread() called");
     const client = await getClient();
-    let chats: any[];
-    try {
-      chats = await client.getChats();
-    } catch (e: any) {
-      throw new Error(`getChats() failed: ${e?.message || e}`);
-    }
+    const chats = await getChatsWithRetry(client);
     const contacts = chats
       .filter((c: any) => c.unreadCount > 0 && !c.archived)
       .map((c: any) => ({ name: c.name, count: c.unreadCount }))
