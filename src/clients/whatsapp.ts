@@ -112,8 +112,8 @@ export function warmClient(): void {
 
   _initPromise = new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(
-      () => reject(new Error("WhatsApp client timed out after 120s")),
-      120_000
+      () => reject(new Error("WhatsApp client timed out after 3 minutes")),
+      180_000
     );
 
     _client.on("qr", (qr: string) => {
@@ -126,11 +126,32 @@ export function warmClient(): void {
       console.error("WhatsApp authenticated, loading session...");
     });
 
-    _client.on("ready", () => {
+    _client.on("ready", async () => {
       clearTimeout(timeout);
       _currentQR = null;
+      console.error("WhatsApp ready event fired — waiting for chats to sync...");
+
+      // Poll getChats() until chats are actually loaded (max 90s)
+      const syncStart = Date.now();
+      while (Date.now() - syncStart < 90_000) {
+        try {
+          const chats = await _client.getChats();
+          if (chats.length > 0) {
+            console.error(`Chats synced — ${chats.length} chats loaded.`);
+            _isReady = true;
+            resolve();
+            return;
+          }
+        } catch {
+          // getChats not ready yet, keep waiting
+        }
+        console.error("Chats not loaded yet, retrying in 5s...");
+        await new Promise((r) => setTimeout(r, 5000));
+      }
+
+      // Chats never loaded but we're technically authenticated
+      console.error("Warning: chats did not sync within 90s, marking ready anyway.");
       _isReady = true;
-      console.error("WhatsApp ready.");
       resolve();
     });
 
